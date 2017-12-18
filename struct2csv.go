@@ -149,16 +149,21 @@ func (e *Encoder) GetColNames(v interface{}) ([]string, error) {
 		return nil, StructRequiredError{reflect.TypeOf(v).Kind()}
 	}
 	// the returned bool is ignored because it's only used for recursive calls.
-	names := e.getColNames(v)
+	names := e.getColNames(v, "")
 	// keep a copy
 	e.colNames = make([]string, len(names))
 	_ = copy(e.colNames, names)
 	return names, nil
 }
 
+type AnyType interface{}
+func anyTypeFunc(a AnyType) AnyType {
+	return a
+}
+
 // The private func where the work is done.  This also copies the headers
 // to the Encoder.colNames field.
-func (e *Encoder) getColNames(v interface{}) []string {
+func (e *Encoder) getColNames(v interface{}, prefix string) []string {
 	typ := reflect.TypeOf(v)
 	val := reflect.ValueOf(v)
 	var cols []string
@@ -173,9 +178,22 @@ func (e *Encoder) getColNames(v interface{}) []string {
 			continue
 		}
 		vF := val.Field(i)
+
+		// To get the original type
+		if vF.Kind() == reflect.Interface {
+			vF = reflect.ValueOf(anyTypeFunc(vF.Interface()))
+		}
+		if vF.Kind() == reflect.Ptr {
+			vFE := vF.Elem()
+			if vFE.Kind() == reflect.Struct {
+				vF = vFE
+			}
+		}
+
 		switch vF.Kind() {
 		case reflect.Struct:
-			tmp := e.getColNames(vF.Interface())
+			nestedPrefix := prefix + name + "_"
+			tmp := e.getColNames(vF.Interface(), nestedPrefix)
 			cols = append(cols, tmp...)
 			continue
 		default:
@@ -184,7 +202,7 @@ func (e *Encoder) getColNames(v interface{}) []string {
 				continue
 			}
 		}
-		cols = append(cols, name)
+		cols = append(cols, prefix+name)
 	}
 	return cols
 }
@@ -226,7 +244,7 @@ func (e *Encoder) Marshal(v interface{}) ([][]string, error) {
 	s := val.Index(0)
 	switch s.Kind() {
 	case reflect.Struct:
-		cols := e.getColNames(s.Interface())
+		cols := e.getColNames(s.Interface(), "")
 		// keep a copy
 		e.colNames = make([]string, len(cols))
 		_ = copy(e.colNames, cols)
@@ -253,6 +271,9 @@ func (e *Encoder) Marshal(v interface{}) ([][]string, error) {
 // slice of values is returned along with true.
 func (e *Encoder) marshal(val reflect.Value, child bool) (cols []string, ok bool) {
 	var s string
+	if val.Kind() == reflect.Interface {
+		val = reflect.ValueOf(anyTypeFunc(val.Interface()))
+	}
 	switch val.Kind() {
 	case reflect.Ptr:
 		// for maps and slices, check that they are of supported types
