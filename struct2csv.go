@@ -28,6 +28,10 @@ import (
 	"strings"
 )
 
+type Stringer interface {
+	String() string
+}
+
 // A StructRequiredError is returned when a non-struct type is received.
 type StructRequiredError struct {
 	kind reflect.Kind
@@ -192,6 +196,9 @@ func (e *Encoder) getColNames(v interface{}, prefix string) []string {
 
 		switch vF.Kind() {
 		case reflect.Struct:
+			if isStringableStruct(vF) {
+				break
+			}
 			nestedPrefix := prefix + name + "_"
 			tmp := e.getColNames(vF.Interface(), nestedPrefix)
 			cols = append(cols, tmp...)
@@ -266,14 +273,25 @@ func (e *Encoder) Marshal(v interface{}) ([][]string, error) {
 	return rows, nil
 }
 
+func isStringableStruct(val reflect.Value) bool {
+	switch val.Type().Name() {
+	case "Time":
+		return true
+	}
+
+	return false
+}
+
 // marshal returns the marshaled value. If the received value is not of a
 // supported Kind, a nil is returned along with false. For supported kinds, a
 // slice of values is returned along with true.
 func (e *Encoder) marshal(val reflect.Value, child bool) (cols []string, ok bool) {
 	var s string
+
 	if val.Kind() == reflect.Interface {
 		val = reflect.ValueOf(anyTypeFunc(val.Interface()))
 	}
+
 	switch val.Kind() {
 	case reflect.Ptr:
 		// for maps and slices, check that they are of supported types
@@ -289,6 +307,10 @@ func (e *Encoder) marshal(val reflect.Value, child bool) (cols []string, ok bool
 			return e.marshal(vv, child)
 		}
 	case reflect.Struct:
+		if isStringableStruct(val) {
+			stringer, _ := val.Interface().(Stringer)
+			return []string{stringer.String()}, true
+		}
 		return e.marshalStruct(val.Interface(), true)
 	case reflect.Map:
 		s, ok = e.marshalMap(val, child)
